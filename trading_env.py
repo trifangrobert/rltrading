@@ -4,8 +4,11 @@ from collections import deque
 import yfinance as yf
 import random
 
+from utils import TradingGraph
+
 class TradingEnv:
-    def __init__(self, stock_data: pd.DataFrame, period: str = "1y", initial_balance: int = 1000, lookback_window_size: int = 50) -> None:
+    def __init__(self, stock_data: pd.DataFrame, period: str = "1y", initial_balance: int = 1000, lookback_window_size: int = 50, render_range: int = 100) -> None:
+        print("Stock initialized.")
         self.stock_data = stock_data
         self.stock_history = self.stock_data.history(period=period)
         self.stock_history = self.stock_history.dropna().reset_index()
@@ -15,10 +18,12 @@ class TradingEnv:
 
         self.total_steps = len(self.stock_history) - 1
         self.action_space = np.array([0, 1, 2])
-        self.orders_history = deque(maxlen=self.lookback_window_size)
+        self.orders_history = deque(maxlen=self.lookback_window_size) 
         self.market_history = deque(maxlen=self.lookback_window_size)
 
         self.state_size = (self.lookback_window_size, 10) # market_history and order_history length
+
+        self.render_range = render_range
 
     def _get_curr_order(self) -> np.array:
         return np.array([self.balance, self.net_worth, self.bought_shares, self.sold_shares, self.held_shares])
@@ -27,6 +32,9 @@ class TradingEnv:
         return self.stock_history.loc[current_step, ["Open", "High", "Low", "Close", "Volume"]].to_numpy()
 
     def reset(self, env_step_size: int = 0) -> np.array:
+        self.visualization = TradingGraph(render_range=self.render_range)
+        self.trades = deque(maxlen=self.render_range) # this list will be used for arrows (buy or sell) on the graph
+
         self.balance = self.initial_balance
         self.net_worth = self.initial_balance
         self.prev_net_worth = self.initial_balance
@@ -64,6 +72,10 @@ class TradingEnv:
             self.stock_history.loc[self.current_step, "Close"]
         )
 
+        date = self.stock_history.loc[self.current_step, "Date"]
+        high = self.stock_history.loc[self.current_step, "High"]
+        low = self.stock_history.loc[self.current_step, "Low"]
+
         if action == 0: # hold
             pass
 
@@ -71,13 +83,15 @@ class TradingEnv:
             # buy as many shares as possible with current balance
             self.bought_shares = self.balance / current_price
             self.held_shares += self.bought_shares
-            self.balance = 0
+            self.balance -= self.bought_shares * current_price
+            self.trades.append({"date": date, "high": high, "low": low, "type": "buy"})
 
         elif action == 2 and self.held_shares > 0:
             # sell all shares
             self.sold_shares = self.held_shares
             self.balance += self.sold_shares * current_price
-            self.held_shares = 0
+            self.held_shares -= self.sold_shares
+            self.trades.append({"date": date, "high": high, "low": low, "type": "sell"})
 
         self.prev_net_worth = self.net_worth
         self.net_worth = self.balance + self.held_shares * current_price
@@ -100,8 +114,19 @@ class TradingEnv:
         obs = np.concatenate((self.orders_history, self.market_history), axis=1)
         return obs
 
-    def render(self):
-        print(f"Step: {self.current_step - self.start_step + 1}, Net Worth: {self.net_worth}")
+    def render(self, visualize: bool = False) -> None:
+        if visualize:
+            self.visualization.render(
+                date = self.stock_history.loc[self.current_step, "Date"],
+                open = self.stock_history.loc[self.current_step, "Open"],
+                high = self.stock_history.loc[self.current_step, "High"],
+                low = self.stock_history.loc[self.current_step, "Low"],
+                close = self.stock_history.loc[self.current_step, "Close"],
+                volume = self.stock_history.loc[self.current_step, "Volume"],
+                net_worth = self.net_worth,
+                trades = self.trades
+            )
+        # print(f"Step: {self.current_step - self.start_step + 1}, Net Worth: {self.net_worth}")
 
 
 if __name__ == "__main__":
