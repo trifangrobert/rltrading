@@ -48,6 +48,17 @@ class TradingGraph:
         self.ax1.xaxis.set_major_formatter(self.date_format)
         self.fig.autofmt_xdate()
 
+        for trade in trades:
+            trade_date = mpl_dates.date2num([pd.to_datetime(trade['date'])])[0]
+            if trade_date in date_render_range:
+                if trade['type'] == 'buy':
+                    price = trade['low'] - 10
+                    self.ax1.scatter(trade_date, price, color='green', s=100, marker='^')
+                else:
+                    price = trade['high'] + 10
+                    self.ax1.scatter(trade_date, price, color='red', s=100, marker='v')
+                    
+
         self.ax2.set_xlabel("Date")
         self.ax1.set_ylabel("Price")
         self.ax3.yaxis.set_label_position("right")
