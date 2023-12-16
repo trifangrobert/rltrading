@@ -4,7 +4,7 @@ from collections import deque
 import yfinance as yf
 import random
 
-from utils import TradingGraph
+from rl.utils import TradingGraph
 
 class TradingEnv:
     def __init__(self, stock_data: pd.DataFrame, period: str = "1y", initial_balance: int = 1000, lookback_window_size: int = 50, render_range: int = 100) -> None:

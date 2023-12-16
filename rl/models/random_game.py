@@ -1,4 +1,4 @@
-from trading_env import TradingEnv
+from rl.trading_env import TradingEnv
 import numpy as np
 from tqdm import tqdm
 import yfinance as yf
@@ -27,3 +27,4 @@ def random_trading(env, train_episodes: int = 1, training_batch_size: int = 500)
 if __name__ == "__main__":
     env = TradingEnv(stock_data=yf.Ticker("MSFT"), period="5y", initial_balance=1000, lookback_window_size=50)
     random_trading(env)
+    
