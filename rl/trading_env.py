@@ -21,7 +21,7 @@ class TradingEnv:
         self.orders_history = deque(maxlen=self.lookback_window_size) 
         self.market_history = deque(maxlen=self.lookback_window_size)
 
-        self.state_size = (self.lookback_window_size, 10) # market_history and order_history length
+        self.state_size = (self.lookback_window_size, 10) # market_history and order_history 
 
         self.render_range = render_range
 
@@ -71,6 +71,8 @@ class TradingEnv:
             self.stock_history.loc[self.current_step, "Open"],
             self.stock_history.loc[self.current_step, "Close"]
         )
+
+        # current_price = (self.stock_history.loc[self.current_step, "Open"] + self.stock_history.loc[self.current_step, "Close"]) / 2
 
         date = self.stock_history.loc[self.current_step, "Date"]
         high = self.stock_history.loc[self.current_step, "High"]
