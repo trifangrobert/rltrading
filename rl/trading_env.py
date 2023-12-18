@@ -25,6 +25,7 @@ class TradingEnv:
 
         self.render_range = render_range
 
+
     def _get_curr_order(self) -> np.array:
         return np.array([self.balance, self.net_worth, self.bought_shares, self.sold_shares, self.held_shares])
 
