@@ -23,8 +23,8 @@ class ActorCriticAgent:
         self.output_shape = 256
 
         self.shared_layers = ActorCritic(self.state_size, self.output_shape, self.model)
-        self.actor = Actor(self.shared_layers, self.output_shape, self.action_space.shape[0])
-        self.critic = Critic(self.shared_layers, self.output_shape, self.action_space.shape[0])
+        self.actor = Actor(self.shared_layers, input_shape=self.output_shape, output_shape=self.action_space.shape[0])
+        self.critic = Critic(self.shared_layers, input_shape=self.output_shape)
         
 
     def get_gaes(self, rewards, dones, values, next_values, gamma=0.99, lamda=0.95, normalize=True):
@@ -45,7 +45,8 @@ class ActorCriticAgent:
     
     def actor_loss(self, y_true, y_pred):
         '''
-        https://arxiv.org/abs/1707.06347 proximal policy optimization
+        proximal policy optimization
+        https://arxiv.org/abs/1707.06347 
         '''
         advantages, prediction_picks, actions = y_true[:, :1], y_true[:, 1:1+self.action_space.shape[0]], y_true[:, 1+self.action_space.shape[0]:]
         LOSS_CLIPPING = 0.2
@@ -81,6 +82,9 @@ class ActorCriticAgent:
         value_loss = torch.mean((y_true - y_pred) ** 2)
         return value_loss
 
+    def train(self, env, train_episode: int = 50, training_batch_size: int = 500, save_path: str = "../experiments") -> None:
+        save_path = save_path + "/" + self.log_name + ".pt"
+
 
 class ActorCritic(nn.Module):
     def __init__(self, input_shape: tuple, output_shape: int = 256, model: str = "Dense") -> None:
@@ -102,16 +106,16 @@ class ActorCritic(nn.Module):
         
 
 class Actor(nn.Module):
-    def __init__(self, shared_layers: nn.Module, input_shape: int, action_space: int) -> None:
+    def __init__(self, shared_layers: nn.Module, input_shape: int, output_shape: int) -> None:
         super(Actor, self).__init__()
         self.input_shape = input_shape
-        self.action_space = action_space
+        self.output_shape = output_shape
         self.shared_layers = shared_layers
 
         self.actor_head = nn.Sequential(
             nn.Linear(input_shape, 128),
             nn.ReLU(),
-            nn.Linear(128, self.action_space),
+            nn.Linear(128, self.output_shape),
             nn.Softmax(dim=-1)
         )
 
@@ -123,10 +127,9 @@ class Actor(nn.Module):
         
 
 class Critic(nn.Module):
-    def __init__(self, shared_layers: nn.Module, input_shape: int, action_space: int) -> None:
+    def __init__(self, shared_layers: nn.Module, input_shape: int) -> None:
         super(Critic, self).__init__()
         self.input_shape = input_shape
-        self.action_space = action_space
         self.shared_layers = shared_layers
 
         self.critic_head = nn.Sequential(
