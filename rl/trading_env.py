@@ -25,6 +25,8 @@ class TradingEnv:
 
         self.render_range = render_range
 
+        self.normalize_value = 40000
+
 
     def _get_curr_order(self) -> np.array:
         return np.array([self.balance, self.net_worth, self.bought_shares, self.sold_shares, self.held_shares])
@@ -43,6 +45,13 @@ class TradingEnv:
         self.held_shares = 0
         self.sold_shares = 0
         self.bought_shares = 0
+
+        self.episode_orders = 0
+        self.prev_episode_orders = 0
+
+        self.rewards = deque(maxlen=self.render_range)
+        self.punish_value = 0
+        self.env_step_size = env_step_size
 
         if env_step_size > 0: # this is for training
             self.start_step = random.randint(self.lookback_window_size, self.total_steps - env_step_size)
@@ -87,21 +96,24 @@ class TradingEnv:
             self.bought_shares = self.balance / current_price
             self.held_shares += self.bought_shares
             self.balance -= self.bought_shares * current_price
-            self.trades.append({"date": date, "high": high, "low": low, "type": "buy"})
+            self.trades.append({"date": date, "high": high, "low": low, "type": "buy", 'total': self.bought_shares, 'current_price': current_price})
+            self.episode_orders += 1
 
         elif action == 2 and self.held_shares > 0:
             # sell all shares
             self.sold_shares = self.held_shares
             self.balance += self.sold_shares * current_price
             self.held_shares -= self.sold_shares
-            self.trades.append({"date": date, "high": high, "low": low, "type": "sell"})
+            self.trades.append({"date": date, "high": high, "low": low, "type": "sell", 'total': self.sold_shares, 'current_price': current_price})
+            self.episode_orders += 1
 
         self.prev_net_worth = self.net_worth
         self.net_worth = self.balance + self.held_shares * current_price
 
         self.orders_history.append(self._get_curr_order())
 
-        reward = self.net_worth - self.prev_net_worth
+        # reward = self.net_worth - self.prev_net_worth
+        reward = self.get_reward()
         
         if self.net_worth <= self.initial_balance / 2: # esti praf, du-te acasa
             done = True
@@ -111,6 +123,25 @@ class TradingEnv:
         obs = self._next_observation()
 
         return obs, reward, done
+    
+    def get_reward(self): # this needs checking
+        self.punish_value += self.net_worth * 0.00001
+        if self.episode_orders > 1 and self.episode_orders > self.prev_episode_orders:
+            self.prev_episode_orders = self.episode_orders
+            if self.trades[-1]['type'] == "buy" and self.trades[-2]['type'] == "sell":
+                reward = self.trades[-2]['total']*self.trades[-2]['current_price'] - self.trades[-2]['total']*self.trades[-1]['current_price']
+                reward -= self.punish_value
+                self.punish_value = 0
+                self.trades[-1]["Reward"] = reward
+                return reward
+            elif self.trades[-1]['type'] == "sell" and self.trades[-2]['type'] == "buy":
+                reward = self.trades[-1]['total']*self.trades[-1]['current_price'] - self.trades[-2]['total']*self.trades[-2]['current_price']
+                reward -= self.punish_value
+                self.punish_value = 0
+                self.trades[-1]["Reward"] = reward
+                return reward
+        else:
+            return 0 - self.punish_value
 
     def _next_observation(self) -> np.array:
         self.market_history.append(self._get_curr_market(self.current_step))
