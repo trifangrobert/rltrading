@@ -8,31 +8,30 @@ from tqdm import tqdm
 from collections import deque
 import yfinance as yf
 
-from rl.trading_env import TradingEnv
+from .trading_env import TradingEnv
 
 torch.autograd.set_detect_anomaly(True)
 
-
 class ActorCriticAgent:
-    def __init__(self, lookback_window_size: int = 50, order_window_size: int = 10, lr: float = 0.00005, epochs: int = 1, batch_size: int = 32, model: str = "Dense") -> None:
+    def __init__(self, lookback_window_size: int = 50, lr: float = 0.00005, model: str = "Dense", best_average: float = 0) -> None:
         self.lookback_window_size = lookback_window_size
         self.model = model
         self.action_space = np.array([0, 1, 2])
-        self.state_size = (self.lookback_window_size, order_window_size) # market_history and order_history
+        self.state_size = (self.lookback_window_size, 10) # lookback_window_size x (market_history + order_history = 10)
 
         self.log_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f"_model"
 
         self.lr = lr
-        self.epochs = epochs
-        self.batch_size = batch_size
         self.output_shape = 256
 
-        self.shared_layers = ActorCritic(self.state_size, self.output_shape, self.model)
-        self.actor = Actor(self.shared_layers, input_shape=self.output_shape, output_shape=self.action_space.shape[0])
-        self.critic = Critic(self.shared_layers, input_shape=self.output_shape)
+        self.shared_layers = ActorCritic(input_shape=self.state_size,  hidden_size=512, output_shape=self.output_shape, model=self.model)
+        self.actor = Actor(self.shared_layers, input_shape=self.output_shape, hidden_size=128, output_shape=self.action_space.shape[0])
+        self.critic = Critic(self.shared_layers, input_shape=self.output_shape, hidden_size=128)
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optimizer = Adam(self.critic.parameters(), lr=self.lr)
+
+        self.best_average = best_average
         
 
     def get_gaes(self, rewards, dones, values, next_values, gamma=0.99, lamda=0.95, normalize=True):
@@ -40,12 +39,26 @@ class ActorCriticAgent:
         generalized advantage estimation
         https://arxiv.org/abs/1506.02438
         '''  
+        # print(f"rewards: {rewards}")
+
+        # check if the parameters do not have nan values
+        assert not np.isnan(rewards).any()
+        assert not np.isnan(dones).any()
+        assert not np.isnan(values).any()
+        assert not np.isnan(next_values).any()
+
         deltas = [r + gamma * (1 - d) * nv - v for r, d, nv, v in zip(rewards, dones, next_values, values)]
         deltas = np.stack(deltas).squeeze()
+
+        # print(f"deltas: {deltas}")
         gaes = np.copy(deltas)
+        gaes = gaes.astype(np.float32)
+
+        # print(f"gaes: {gaes}")
         for t in reversed(range(len(deltas) - 1)):
             gaes[t] = gaes[t] + (1 - dones[t]) * gamma * lamda * gaes[t + 1]
 
+        # print(f"gaes: {gaes}")
         target = gaes + values
         if normalize:
             gaes = (gaes - gaes.mean()) / (gaes.std() + 1e-8)
@@ -90,10 +103,9 @@ class ActorCriticAgent:
         value_loss = torch.mean((y_true - y_pred) ** 2)
         return value_loss
     
-    def train(self, env, train_episodes: int = 50, training_batch_size: int = 500, save_path: str = "experiments/") -> None:
+    def train(self, env, train_episodes: int = 10, training_batch_size: int = 500, save_path: str = "./experiments/") -> None:
         save_path = os.path.join(save_path, self.log_name)
-        total_average = deque(maxlen=100)
-        best_average = 0
+        total_average = deque(maxlen=5)
 
         for episode in tqdm(range(train_episodes), desc="Training"):
             state = env.reset(env_step_size=training_batch_size)
@@ -101,8 +113,9 @@ class ActorCriticAgent:
             states, actions, rewards, predictions, dones, next_states = [], [], [], [], [], []
 
             for _ in range(training_batch_size):
-                action, prediction = self.act(state)
-                next_state, reward, done = env.step(action)
+                action, prediction = self.act(state) # action is either hold, buy or sell and prediction is the probability of each action
+
+                next_state, reward, done = env.step(action) 
 
                 states.append(state)
                 actions.append(action)
@@ -113,12 +126,23 @@ class ActorCriticAgent:
 
                 state = next_state
 
-            states = torch.tensor(states, dtype=torch.float32)
-            actions = torch.tensor(actions, dtype=torch.float32)
+            # import pdb ; pdb.set_trace()
+            states = np.array(states, dtype=np.float32)
+            states = torch.tensor(states)
+
+            actions = np.array(actions, dtype=np.float32)
+            actions = torch.tensor(actions)
+
             rewards = torch.tensor(rewards, dtype=torch.float32)
-            predictions = torch.tensor(predictions, dtype=torch.float32)
-            dones = torch.tensor(dones, dtype=torch.float32)
-            next_states = torch.tensor(next_states, dtype=torch.float32)
+
+            predictions = np.array(predictions, dtype=np.float32)
+            predictions = torch.tensor(predictions)
+
+            dones = np.array(dones, dtype=np.float32)
+            dones = torch.tensor(dones)
+
+            next_states = np.array(next_states, dtype=np.float32)
+            next_states = torch.tensor(next_states)
 
             curr_values = self.critic(states).detach().numpy()
             next_values = self.critic(next_states).detach().numpy()
@@ -134,7 +158,6 @@ class ActorCriticAgent:
             target = torch.tensor(target, dtype=torch.float32)
             critic_loss = self.critic_loss(target, self.critic(states))
 
-            # import pdb; pdb.set_trace()
             total_loss = actor_loss + critic_loss
             
             self.actor_optimizer.zero_grad()
@@ -145,22 +168,22 @@ class ActorCriticAgent:
             self.actor_optimizer.step()
             self.critic_optimizer.step()
 
-
             total_average.append(env.net_worth)
             average = np.mean(total_average)
 
-            if episode > len(total_average) and best_average < average:
+            if self.best_average < average:
                 self.save(save_path)
                 print("Saving model at episode {} with average net worth of {}".format(episode, average))
-                best_average = average
+                self.best_average = average
 
             if episode % 10 == 0:
-                print("Episode: {}, total average: {}, current episode average: {}".format(episode, average, env.net_worth))
+                print("Episode: {}, total average: {}, current episode net worth: {}".format(episode, average, env.net_worth))
 
     def test(self, env, test_episodes: int = 10) -> None:
         average_net_worth = 0
         average_orders = 0
         no_profit_episodes = 0
+        profit = 0
         for episode in tqdm(range(test_episodes), desc="Testing"):
             state = env.reset()
             while True:
@@ -169,6 +192,7 @@ class ActorCriticAgent:
                 state, reward, done = env.step(action)
 
                 if env.current_step == env.end_step:
+                    profit = env.net_worth - env.initial_balance
                     average_net_worth += env.net_worth
                     average_orders += env.episode_orders
                     if env.net_worth < env.initial_balance:
@@ -179,7 +203,7 @@ class ActorCriticAgent:
         print("Average net worth: {}".format(average_net_worth / test_episodes))
         print("Average orders: {}".format(average_orders / test_episodes))
         print("No profit episodes: {}".format(no_profit_episodes))
-
+        print("Profit: {}".format(profit))
 
 
     def act(self, state):
@@ -204,15 +228,15 @@ class ActorCriticAgent:
     
 
 class ActorCritic(nn.Module):
-    def __init__(self, input_shape: tuple, output_shape: int = 256, model: str = "Dense") -> None:
+    def __init__(self, input_shape: tuple, hidden_size: int = 512, output_shape: int = 256, model: str = "Dense") -> None:
         super(ActorCritic, self).__init__()
         self.input_shape = input_shape
 
         if model == "Dense":
             self.shared_layers = nn.Sequential(
-                nn.Linear(input_shape[0] * input_shape[1], 512),
+                nn.Linear(input_shape[0] * input_shape[1], hidden_size),
                 nn.ReLU(),
-                nn.Linear(512, output_shape),
+                nn.Linear(hidden_size, output_shape),
                 nn.ReLU(),
             )
 
@@ -222,16 +246,16 @@ class ActorCritic(nn.Module):
 
 
 class Actor(nn.Module):
-    def __init__(self, shared_layers: nn.Module, input_shape: int, output_shape: int) -> None:
+    def __init__(self, shared_layers: nn.Module, input_shape: int, hidden_size: int, output_shape: int) -> None:
         super(Actor, self).__init__()
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.shared_layers = shared_layers
 
         self.actor_head = nn.Sequential(
-            nn.Linear(input_shape, 128),
+            nn.Linear(input_shape, hidden_size),
             nn.ReLU(),
-            nn.Linear(128, self.output_shape),
+            nn.Linear(hidden_size, self.output_shape),
             nn.Softmax(dim=-1)
         )
 
@@ -243,15 +267,15 @@ class Actor(nn.Module):
         
 
 class Critic(nn.Module):
-    def __init__(self, shared_layers: nn.Module, input_shape: int) -> None:
+    def __init__(self, shared_layers: nn.Module, input_shape: int, hidden_size: int) -> None:
         super(Critic, self).__init__()
         self.input_shape = input_shape
         self.shared_layers = shared_layers
 
         self.critic_head = nn.Sequential(
-            nn.Linear(256, 128),
+            nn.Linear(self.input_shape, hidden_size),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(hidden_size, 1)
         )
 
     def forward(self, state):
@@ -262,11 +286,16 @@ class Critic(nn.Module):
 
 if __name__ == "__main__":
     # test actor critic model
-    agent = ActorCriticAgent()
+    lookback_window_size = 20
+
+    agent = ActorCriticAgent(lookback_window_size=lookback_window_size)
     print(agent.shared_layers)
     print(agent.actor)
     print(agent.critic)
 
-    env = TradingEnv(stock_data=yf.Ticker("MSFT"), period="5y", initial_balance=1000, lookback_window_size=50)
-    agent.train(env)
-    agent.test(env)
+    env = TradingEnv(stock_data=yf.Ticker("MSFT"), period="5y", initial_balance=1000, lookback_window_size=lookback_window_size)
+    agent.train(env, train_episodes=100)
+
+    # agent.load("../experiments/2023-12-22-17-26-29_model")
+    # agent.load("../experiments/2023-12-22-18-31-34_model")
+    # agent.test(env, test_episodes=1)

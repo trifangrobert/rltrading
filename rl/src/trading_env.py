@@ -7,7 +7,7 @@ import random
 from rl.utils import TradingGraph
 
 class TradingEnv:
-    def __init__(self, stock_data: pd.DataFrame, period: str = "1y", initial_balance: int = 1000, lookback_window_size: int = 50, render_range: int = 100) -> None:
+    def __init__(self, stock_data: pd.DataFrame, period: str = "1y", initial_balance: int = 1000, lookback_window_size: int = 50, render_range: int = 100, punish_coef: float = 0.1) -> None:
         print("Stock initialized.")
         self.stock_data = stock_data
         self.stock_history = self.stock_data.history(period=period)
@@ -21,11 +21,12 @@ class TradingEnv:
         self.orders_history = deque(maxlen=self.lookback_window_size) 
         self.market_history = deque(maxlen=self.lookback_window_size)
 
-        self.state_size = (self.lookback_window_size, 10) # market_history and order_history 
+        self.episode_orders = 0
 
         self.render_range = render_range
 
-        self.normalize_value = 40000
+        self.punish_coef = punish_coef
+        self.normalize_value = 10000
 
 
     def _get_curr_order(self) -> np.array:
@@ -110,23 +111,23 @@ class TradingEnv:
         self.prev_net_worth = self.net_worth
         self.net_worth = self.balance + self.held_shares * current_price
 
-        self.orders_history.append(self._get_curr_order())
+        # self.orders_history.append(self._get_curr_order())
 
         # reward = self.net_worth - self.prev_net_worth
-        reward = self.get_reward()
+        reward = self.get_reward() / self.normalize_value
         
         if self.net_worth <= self.initial_balance / 2: # esti praf, du-te acasa
             done = True
         else:
             done = False
 
-        obs = self._next_observation()
+        obs = self._next_observation() 
 
         return obs, reward, done
     
-    def get_reward(self): # this needs checking
-        self.punish_value += self.net_worth * 0.00001
-        if self.episode_orders > 1 and self.episode_orders > self.prev_episode_orders:
+    def get_reward(self):
+        self.punish_value += self.net_worth * self.punish_coef
+        if len(self.trades) >= 2 and self.episode_orders > 1 and self.episode_orders > self.prev_episode_orders:
             self.prev_episode_orders = self.episode_orders
             if self.trades[-1]['type'] == "buy" and self.trades[-2]['type'] == "sell":
                 reward = self.trades[-2]['total']*self.trades[-2]['current_price'] - self.trades[-2]['total']*self.trades[-1]['current_price']
@@ -140,10 +141,13 @@ class TradingEnv:
                 self.punish_value = 0
                 self.trades[-1]["Reward"] = reward
                 return reward
+            else:
+                return 0 - self.punish_value
         else:
             return 0 - self.punish_value
 
     def _next_observation(self) -> np.array:
+        self.orders_history.append(self._get_curr_order())
         self.market_history.append(self._get_curr_market(self.current_step))
         obs = np.concatenate((self.orders_history, self.market_history), axis=1)
         return obs
