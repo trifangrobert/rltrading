@@ -14,7 +14,7 @@ if __name__ == "__main__":
     stock_tickers = ["MSFT", "AAPL", "AMZN", "GOOG", "META", "TSLA", "NVDA", "BB", "AMD", "INTC", "PLTR", "ABNB", "UBER", "DASH", "ZM"]
     # shuffle the tickers
     random.shuffle(stock_tickers)
-    train_tickers = stock_tickers[:3]
+    train_tickers = stock_tickers[:10]
 
     print(f"Training on: {train_tickers}")
 

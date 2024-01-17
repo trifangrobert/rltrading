@@ -19,7 +19,7 @@ class ActorCriticAgent:
         self.action_space = np.array([0, 1, 2])
         self.state_size = (self.lookback_window_size, 10) # lookback_window_size x (market_history + order_history = 10)
 
-        self.log_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f"_model"
+        self.log_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + "_model"
 
         self.lr = lr
         self.output_shape = 256
@@ -27,6 +27,10 @@ class ActorCriticAgent:
         self.shared_layers = ActorCritic(input_shape=self.state_size,  hidden_size=512, output_shape=self.output_shape, model=self.model)
         self.actor = Actor(self.shared_layers, input_shape=self.output_shape, hidden_size=128, output_shape=self.action_space.shape[0])
         self.critic = Critic(self.shared_layers, input_shape=self.output_shape, hidden_size=128)
+
+        # self.shared_layers.to(device)
+        # self.actor.to(device)
+        # self.critic.to(device)
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optimizer = Adam(self.critic.parameters(), lr=self.lr)
@@ -85,7 +89,6 @@ class ActorCriticAgent:
         # clip to prevent from exploding
         p2 = torch.clamp(ratio, min=1 - LOSS_CLIPPING, max=1 + LOSS_CLIPPING) * advantages 
 
-        # check ???
         actor_loss = -torch.mean(torch.min(p1, p2))
 
         # entropy to encourage exploration
@@ -105,7 +108,7 @@ class ActorCriticAgent:
     
     def train(self, env, train_episodes: int = 10, training_batch_size: int = 500, save_path: str = "./experiments/") -> None:
         save_path = os.path.join(save_path, self.log_name)
-        total_average = deque(maxlen=5)
+        total_average = deque(maxlen=100)
 
         for episode in tqdm(range(train_episodes), desc="Training"):
             state = env.reset(env_step_size=training_batch_size)
@@ -118,7 +121,9 @@ class ActorCriticAgent:
                 next_state, reward, done = env.step(action) 
 
                 states.append(state)
-                actions.append(action)
+                action_one_hot = np.zeros(self.action_space.shape[0])
+                action_one_hot[action] = 1
+                actions.append(action_one_hot)
                 rewards.append(reward)
                 predictions.append(prediction)
                 dones.append(done)
@@ -150,12 +155,10 @@ class ActorCriticAgent:
             advantages, target = self.get_gaes(rewards, dones, curr_values, next_values)
 
             advantages = torch.tensor(advantages, dtype=torch.float32)
-            actions = actions.unsqueeze(1)
-
+            target = torch.tensor(target, dtype=torch.float32)
             y_true = torch.cat([advantages, predictions, actions], dim=1)
 
             actor_loss = self.actor_loss(y_true, self.actor(states))
-            target = torch.tensor(target, dtype=torch.float32)
             critic_loss = self.critic_loss(target, self.critic(states))
 
             total_loss = actor_loss + critic_loss

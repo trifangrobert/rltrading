@@ -17,7 +17,7 @@ class TradingEnv:
         self.lookback_window_size = lookback_window_size
 
         self.total_steps = len(self.stock_history) - 1
-        self.action_space = np.array([0, 1, 2])
+        self.action_space = np.array([0, 1, 2]) # hold buy sell
         self.orders_history = deque(maxlen=self.lookback_window_size) 
         self.market_history = deque(maxlen=self.lookback_window_size)
 
@@ -130,7 +130,7 @@ class TradingEnv:
         if len(self.trades) >= 2 and self.episode_orders > 1 and self.episode_orders > self.prev_episode_orders:
             self.prev_episode_orders = self.episode_orders
             if self.trades[-1]['type'] == "buy" and self.trades[-2]['type'] == "sell":
-                reward = self.trades[-2]['total']*self.trades[-2]['current_price'] - self.trades[-2]['total']*self.trades[-1]['current_price']
+                reward = self.trades[-2]['total']*self.trades[-2]['current_price'] - self.trades[-1]['total']*self.trades[-1]['current_price']
                 reward -= self.punish_value
                 self.punish_value = 0
                 self.trades[-1]["Reward"] = reward
