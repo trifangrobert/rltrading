@@ -21,7 +21,7 @@ class TradingGraph:
         plt.style.use("ggplot")
 
         plt.close("all") # close all previous matplotlib plots
-        self.fig = plt.figure(figsize=(16, 8))
+        self.fig = plt.figure(figsize=(16, 8), tight_layout=True)
         self.ax1 = plt.subplot2grid((6, 1), (0, 0), rowspan=5, colspan=1)
         self.ax2 = plt.subplot2grid((6, 1), (5, 0), rowspan=1, colspan=1, sharex=self.ax1)
         self.ax3 = self.ax1.twinx()
@@ -65,7 +65,7 @@ class TradingGraph:
         self.ax3.yaxis.tick_right()
         self.ax3.set_ylabel("Net Worth")
 
-        self.fig.tight_layout()
+        # self.fig.tight_layout()  # prevent "UserWarning: figure layout changed to tight" by adding tight_layout=True to figure()
 
         self.fig.canvas.draw()
         img = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")

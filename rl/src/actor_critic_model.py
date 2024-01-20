@@ -8,7 +8,7 @@ from tqdm import tqdm
 from collections import deque
 import yfinance as yf
 
-from .trading_env import TradingEnv
+from rl.src.trading_env import TradingEnv
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -106,7 +106,7 @@ class ActorCriticAgent:
         value_loss = torch.mean((y_true - y_pred) ** 2)
         return value_loss
     
-    def train(self, env, train_episodes: int = 10, training_batch_size: int = 500, save_path: str = "./experiments/") -> None:
+    def train(self, env: TradingEnv, train_episodes: int = 10, training_batch_size: int = 500, save_path: str = "./experiments/") -> None:
         save_path = os.path.join(save_path, self.log_name)
         total_average = deque(maxlen=100)
 
@@ -231,7 +231,7 @@ class ActorCriticAgent:
     
 
 class ActorCritic(nn.Module):
-    def __init__(self, input_shape: tuple, hidden_size: int = 512, output_shape: int = 256, model: str = "Dense") -> None:
+    def __init__(self, input_shape: tuple[int], hidden_size: int = 512, output_shape: int = 256, model: str = "Dense") -> None:
         super(ActorCritic, self).__init__()
         self.input_shape = input_shape
 
@@ -243,7 +243,7 @@ class ActorCritic(nn.Module):
                 nn.ReLU(),
             )
 
-    def forward(self, x):
+    def forward(self, x: np.ndarray):
         x = x.view(-1, self.input_shape[0] * self.input_shape[1])
         return self.shared_layers(x)
 

@@ -29,13 +29,13 @@ class TradingEnv:
         self.normalize_value = 10000
 
 
-    def _get_curr_order(self) -> np.array:
+    def _get_curr_order(self) -> np.ndarray:
         return np.array([self.balance, self.net_worth, self.bought_shares, self.sold_shares, self.held_shares])
 
-    def _get_curr_market(self, current_step) -> np.array:
+    def _get_curr_market(self, current_step) -> np.ndarray:
         return self.stock_history.loc[current_step, ["Open", "High", "Low", "Close", "Volume"]].to_numpy()
 
-    def reset(self, env_step_size: int = 0) -> np.array:
+    def reset(self, env_step_size: int = 0) -> np.ndarray:
         self.visualization = TradingGraph(render_range=self.render_range)
         self.trades = deque(maxlen=self.render_range) # this list will be used for arrows (buy or sell) on the graph
 
@@ -73,7 +73,7 @@ class TradingEnv:
         state = np.concatenate((self.orders_history, self.market_history), axis=1)
         return state
 
-    def step(self, action: int) -> tuple:
+    def step(self, action: int) -> tuple[np.ndarray, float, bool]:
         self.bought_shares = 0
         self.sold_shares = 0
         self.current_step += 1
@@ -125,7 +125,7 @@ class TradingEnv:
 
         return obs, reward, done
     
-    def get_reward(self):
+    def get_reward(self) -> float:
         self.punish_value += self.net_worth * self.punish_coef
         if len(self.trades) >= 2 and self.episode_orders > 1 and self.episode_orders > self.prev_episode_orders:
             self.prev_episode_orders = self.episode_orders
@@ -146,7 +146,7 @@ class TradingEnv:
         else:
             return 0 - self.punish_value
 
-    def _next_observation(self) -> np.array:
+    def _next_observation(self) -> np.ndarray:
         self.orders_history.append(self._get_curr_order())
         self.market_history.append(self._get_curr_market(self.current_step))
         obs = np.concatenate((self.orders_history, self.market_history), axis=1)
