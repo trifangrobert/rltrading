@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
+import time
 from tqdm import tqdm
 from typing import Literal
 import yfinance as yf
@@ -13,16 +14,22 @@ from rl.src.trading_env import TradingEnv
 
 class QLearningParams:
     def __init__(self) -> None:
-        self.start_epsilon: float = 0.3
-        self.end_epsilon: float = 0.3
-        self.epsilon_decay: float | None = None
-        self.use_epsilon_decay: bool = False
+        self.start_epsilon: float = 1
+        self.end_epsilon: float = 0.01
+        self.epsilon_decay: float = 0.995
+        self.use_epsilon_decay: bool = True
 
-        self.gamma: float = 0.8
-        self.alpha: float = 0.1
+        self.gamma: float = 0.5
+
+        self.start_alpha = 0.3
+        self.end_alpha = 0.01
+        self.alpha_decay = 0.995
 
         self.lookback_window_size: int = 6
         self.stock_norm_type: Literal["log"] = "log"
+
+    def __str__(self) -> str:
+        return "\n".join([f"{k}: {v}" for k, v in self.__dict__.items()])
 
 
 def q_table_factory() -> np.ndarray:
@@ -69,7 +76,14 @@ class QLearningAgent:
             # stock price (i - 1) days ago - stock price (i) days ago
             stock_price_today = (env_state[-i][5] + env_state[-i][8]) / 2
             stock_price_yesterday = (env_state[-i - 1][5] + env_state[-i - 1][8]) / 2
-            q_state[i] = int(np.sign(stock_price_today - stock_price_yesterday))
+            q_state[i] = (
+                0
+                if stock_price_today == stock_price_yesterday
+                else int(
+                    np.sign(stock_price_today - stock_price_yesterday)
+                    * np.log2(np.abs(stock_price_today - stock_price_yesterday))
+                )
+            )
 
         return tuple(q_state)
 
@@ -80,6 +94,14 @@ class QLearningAgent:
         else:
             epsilon = self.params.start_epsilon
         return epsilon
+
+    # get alpha based on params
+    def get_alpha(self, n_episode: int) -> float:
+        if self.params.use_epsilon_decay:
+            alpha = max(self.params.start_alpha * (self.params.alpha_decay**n_episode), self.params.end_alpha)
+        else:
+            alpha = self.params.start_alpha
+        return alpha
 
     # select action based on epsilon greedy
     def select_action(self, state: np.ndarray, epsilon: float) -> int:
@@ -93,15 +115,18 @@ class QLearningAgent:
 
         return action
 
-    def update_experience(self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray) -> None:
+    def update_experience(
+        self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, n_episode: int
+    ) -> None:
         q_state = self.env_state_to_q_state(state)
         q_next_state = self.env_state_to_q_state(next_state)
         best_actionIndex_fromNextState = self.__get_best_action(q_next_state)
         best_actionValue_fromNextState = self.q_table[q_next_state][best_actionIndex_fromNextState]
 
+        alpha = self.get_alpha(n_episode)
         target = reward + self.params.gamma * best_actionValue_fromNextState
         self.q_table[q_state][action] = self.q_table[q_state][action] + (
-            self.params.alpha * (target - self.q_table[q_state][action])
+            alpha * (target - self.q_table[q_state][action])
         )
 
     # save to experiments folder
@@ -136,6 +161,7 @@ def train_qlearning_agent(
     avg_net_worths = []
     final_net_worths = []
 
+    t_start = time.time()
     for episode in tqdm(range(num_episodes), desc="Training Q-learning agent"):
         state = env.reset(env_step_size=training_batch_size)
         epsilon = agent.get_epsilon(episode)
@@ -151,7 +177,7 @@ def train_qlearning_agent(
             next_state, reward, done = env.step(action)
 
             # Update agent's knowledge
-            agent.update_experience(state, action, reward, next_state)
+            agent.update_experience(state, action, reward, next_state, episode)
             state = next_state
 
             rewards.append(reward)
@@ -167,6 +193,7 @@ def train_qlearning_agent(
         max_net_worths.append(np.max(net_worths))
         avg_net_worths.append(np.mean(net_worths))
         final_net_worths.append(net_worths[-1])
+    t_end = time.time()
 
     print(f"Finished training")
     q_table_values = np.array(list(agent.q_table.values()))
@@ -174,19 +201,35 @@ def train_qlearning_agent(
     print(f"Number of non-zero q-values: {np.sum(~zero)}")
     if plot:
         fig, ax = plt.subplots(nrows=2, ncols=1)
-        idx1 = 0
-        idx2 = 1
-        ax[idx1].plot(min_rewards, c="r", label="min rewards")
-        ax[idx1].plot(max_rewards, c="limegreen", label="max rewards")
-        ax[idx1].plot(avg_rewards, c="k", label="avg rewards")
-        ax[idx1].legend()
-        ax[idx2].plot(min_net_worths, c="r", label="min net worths")
-        ax[idx2].plot(max_net_worths, c="limegreen", label="max net worths")
-        ax[idx2].plot(avg_net_worths, c="k", label="avg net worths")
-        ax[idx2].plot(final_net_worths, c="b", label="final net worths")
-        ax[idx2].legend()
+        idx_rewards = 0
+        idx_net_worths = 1
+        ax[idx_rewards].plot(min_rewards, c="r", label="min rewards")
+        ax[idx_rewards].plot(max_rewards, c="limegreen", label="max rewards")
+        ax[idx_rewards].plot(avg_rewards, c="k", label="avg rewards")
+        ax[idx_rewards].legend()
+        ax[idx_net_worths].plot(min_net_worths, c="r", label="min net worths")
+        ax[idx_net_worths].plot(max_net_worths, c="limegreen", label="max net worths")
+        ax[idx_net_worths].plot(avg_net_worths, c="k", label="avg net worths")
+        # ax[idx_net_worths].plot(final_net_worths, c="b", label="final net worths")
+        ax[idx_net_worths].legend()
         plt.tight_layout()
         plt.show()
+
+        final_profits = np.array(final_net_worths) - env.initial_balance
+        print(f"Finished training for {num_episodes} episodes")
+        print(f"Params:")
+        print(str(agent.params))
+        print()
+
+        print(f"Total training time: {t_end - t_start:.3f} seconds")
+        print(f"Average training time per episode: {(t_end - t_start) / num_episodes:.3f} seconds")
+        print(f"Initial balance: {env.initial_balance}")
+        print(f"Mean final net worth: {np.mean(final_net_worths):.3f}")
+        print(f"Standard deviation of final net worth: {np.std(final_net_worths):.3f}")
+        print(f"Best final net worth: {np.max(final_net_worths):.3f}")
+        print(f"Mean profit: {np.mean(final_profits):.3f}")
+        print(f"Standard deviation of profit: {np.std(final_profits):.3f}")
+        print(f"Best profit: {np.max(final_profits):.3f}")
 
 
 def test_q_learning_agent(
@@ -198,9 +241,9 @@ def test_q_learning_agent(
     no_profit_episodes = 0
     profit = 0
 
-    for episode in range(num_episodes):
+    for episode in tqdm(range(num_episodes), desc="Testing Q-learning agent"):
         state = env.reset()
-        epsilon = agent.get_epsilon(episode)
+        epsilon = agent.get_epsilon(1e6)
 
         while True:
             if visualize and episode == num_episodes - 1:
